@@ -3,6 +3,7 @@
  */
 
 import { useEffect, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../services/store';
 import { metaSDK, type GlassesEvent } from '../services/metaSDK';
 import type { GlassesDevice } from '../types';
@@ -15,12 +16,22 @@ export function useGlassesConnection() {
     setConnectionState,
     setDevice,
     setError,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((state) => ({
+      connectionState: state.connectionState,
+      device: state.device,
+      error: state.error,
+      setConnectionState: state.setConnectionState,
+      setDevice: state.setDevice,
+      setError: state.setError,
+    }))
+  );
 
   // Set up event listeners
   useEffect(() => {
     const handleConnectionChange = (event: GlassesEvent) => {
       const { state } = event.data as { state: string };
+      console.log('[GlassesConnection] State:', state);
       setConnectionState(state as typeof connectionState);
     };
 
@@ -37,6 +48,7 @@ export function useGlassesConnection() {
 
     const handleError = (event: GlassesEvent) => {
       const { message } = event.data as { message: string };
+      console.error('[GlassesConnection] Error:', message);
       setError(message);
       setConnectionState('error');
     };

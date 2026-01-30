@@ -21,7 +21,7 @@ export async function runComparison(request: ComparisonRequest): Promise<Compari
   const timestamp = new Date().toISOString();
 
   const providers = request.providers || ['anthropic', 'openai', 'zonos'];
-  const shipToCountry = request.shipToCountry || 'FR';
+  const shipToCountry = request.shipToCountry || 'US';
 
   const input: ClassificationInput = {
     imageBase64: request.imageBase64,
@@ -32,37 +32,95 @@ export async function runComparison(request: ComparisonRequest): Promise<Compari
     shipToCountry,
   };
 
-  // Run all classifications in parallel
-  const classificationPromises: Promise<ClassificationResult>[] = [];
+  // Step 1: Run Anthropic FIRST so we can use its output for Zonos
+  const classifications: ComparisonResult['classifications'] = {};
 
   if (providers.includes('anthropic')) {
-    classificationPromises.push(classifyWithAnthropic(input));
+    console.log('[Compare] Running Anthropic classification...');
+    classifications.anthropic = await classifyWithAnthropic(input);
+    console.log('[Compare] Anthropic result:', {
+      hsCode: classifications.anthropic.hsCode6,
+      confidence: classifications.anthropic.confidence,
+      estimatedValue: classifications.anthropic.estimatedValueEUR,
+      productIdentified: (classifications.anthropic.rawResponse as Record<string, unknown>)?.productIdentified,
+      error: classifications.anthropic.error,
+    });
   }
-  if (providers.includes('openai')) {
-    classificationPromises.push(classifyWithOpenAI(input));
-  }
+
+  // Step 2: Run Zonos classification with Anthropic's product identification as fallback
+  // Zonos can't handle base64 images — it needs a URL or product name/description
   if (providers.includes('zonos')) {
-    classificationPromises.push(classifyWithZonos(input));
+    const zonosInput = { ...input };
+
+    // If we only have base64 (no URL, no product name), use Anthropic's identified product
+    const hasImageUrl = !!input.imageUrl;
+    const hasProductName = !!input.productName;
+    const hasProductDescription = !!input.productDescription;
+
+    if (!hasImageUrl && !hasProductName && !hasProductDescription) {
+      const anthropicProduct = (classifications.anthropic?.rawResponse as Record<string, unknown> | undefined)?.productIdentified;
+      const anthropicDesc = classifications.anthropic?.description;
+      if (anthropicProduct) {
+        zonosInput.productName = anthropicProduct as string;
+        console.log('[Compare] Using Anthropic product ID for Zonos:', anthropicProduct);
+      }
+      if (anthropicDesc) {
+        zonosInput.productDescription = anthropicDesc as string;
+      }
+    }
+
+    console.log('[Compare] Running Zonos classification...');
+    classifications.zonos = await classifyWithZonos(zonosInput);
+    console.log('[Compare] Zonos result:', {
+      hsCode: classifications.zonos.hsCode6,
+      confidence: classifications.zonos.confidence,
+      error: classifications.zonos.error,
+    });
   }
 
-  const classificationResults = await Promise.all(classificationPromises);
-
-  // Organize results by provider
-  const classifications: ComparisonResult['classifications'] = {};
-  for (const result of classificationResults) {
-    classifications[result.provider] = result;
+  // Run OpenAI in parallel if requested (non-blocking)
+  if (providers.includes('openai')) {
+    classifications.openai = await classifyWithOpenAI(input);
   }
 
-  // Calculate duties if requested and we have a product value
+  // Step 3: Determine product value
+  let productValue = request.productValue;
+  let isEstimatedValue = false;
+
+  if (!productValue && classifications.anthropic?.estimatedValueEUR) {
+    productValue = classifications.anthropic.estimatedValueEUR;
+    isEstimatedValue = true;
+    console.log('[Compare] Using AI-estimated value:', productValue);
+  }
+
+  // Also handle case where estimatedValueEUR was returned as part of rawResponse but not parsed
+  if (!productValue && classifications.anthropic?.rawResponse) {
+    const raw = classifications.anthropic.rawResponse as Record<string, unknown>;
+    const rawValue = raw.estimatedValueEUR;
+    if (typeof rawValue === 'number' && rawValue > 0) {
+      productValue = rawValue;
+      isEstimatedValue = true;
+      console.log('[Compare] Using value from rawResponse:', productValue);
+    } else if (typeof rawValue === 'string') {
+      const parsed = parseFloat(rawValue);
+      if (!isNaN(parsed) && parsed > 0) {
+        productValue = parsed;
+        isEstimatedValue = true;
+        console.log('[Compare] Parsed string value from rawResponse:', productValue);
+      }
+    }
+  }
+
+  // Step 4: Calculate duties for every provider with a valid HS code
   let dutyCalculations: ComparisonResult['dutyCalculations'] | undefined;
 
-  if (request.calculateDuty && request.productValue) {
+  if (productValue && productValue > 0) {
+    console.log('[Compare] Calculating duties with value:', productValue);
     dutyCalculations = {};
 
     const dutyPromises: Promise<DutyCalculation>[] = [];
     const dutyProviders: Array<'anthropic' | 'openai' | 'zonos'> = [];
 
-    // Calculate duty for each provider's HS code using Zonos Landed Cost
     for (const provider of ['anthropic', 'openai', 'zonos'] as const) {
       const classification = classifications[provider];
       if (classification?.hsCode && !classification.error) {
@@ -70,7 +128,7 @@ export async function runComparison(request: ComparisonRequest): Promise<Compari
         dutyPromises.push(
           calculateDutyWithZonos(
             classification.hsCode,
-            request.productValue,
+            productValue,
             request.currency || 'EUR',
             request.originCountry || 'US',
             shipToCountry
@@ -79,10 +137,37 @@ export async function runComparison(request: ComparisonRequest): Promise<Compari
       }
     }
 
+    // If Zonos classification failed but Anthropic succeeded,
+    // also calculate a "zonos" duty using Anthropic's HS code so user always sees duty
+    if (!classifications.zonos?.hsCode || classifications.zonos?.error) {
+      const anthropicHs = classifications.anthropic;
+      if (anthropicHs?.hsCode && !anthropicHs.error && !dutyProviders.includes('zonos')) {
+        console.log('[Compare] Zonos classification failed — using Anthropic HS code for Zonos duty calc');
+        dutyProviders.push('zonos');
+        dutyPromises.push(
+          calculateDutyWithZonos(
+            anthropicHs.hsCode,
+            productValue,
+            request.currency || 'EUR',
+            request.originCountry || 'US',
+            shipToCountry
+          ).then((duty) => ({ ...duty, provider: 'zonos' as const }))
+        );
+      }
+    }
+
     const dutyResults = await Promise.all(dutyPromises);
     for (let i = 0; i < dutyResults.length; i++) {
       dutyCalculations[dutyProviders[i]] = dutyResults[i];
+      console.log(`[Compare] Duty for ${dutyProviders[i]}:`, {
+        totalLandedCost: dutyResults[i].totalLandedCost,
+        duties: dutyResults[i].duties.amount,
+        vat: dutyResults[i].vat.amount,
+        error: dutyResults[i].error,
+      });
     }
+  } else {
+    console.log('[Compare] No product value available — skipping duty calculation');
   }
 
   // Analyze results
@@ -92,7 +177,9 @@ export async function runComparison(request: ComparisonRequest): Promise<Compari
     id,
     timestamp,
     input,
-    productValue: request.productValue,
+    productValue,
+    isEstimatedValue,
+    shipToCountry,
     currency: request.currency || 'EUR',
     classifications,
     dutyCalculations,

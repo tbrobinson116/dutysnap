@@ -5,11 +5,14 @@
  */
 
 import type { ComparisonResult } from '../types';
+import type { ParsedVoiceCommand } from '../types/voice';
 
-// API configuration - update this for production
+// API configuration
+// In dev mode, use local network IP so physical devices can reach the backend.
+// Update the IP if your network changes. For production, use the real API URL.
 const API_BASE_URL = __DEV__
-  ? 'http://localhost:3001'
-  : 'https://api.dutysnap.com'; // Update with real URL
+  ? 'http://192.168.21.142:3001'
+  : 'https://api.dutysnap.com';
 
 interface ClassifyRequest {
   imageBase64?: string;
@@ -75,7 +78,7 @@ class ApiService {
       body: JSON.stringify({
         ...request,
         providers: ['anthropic', 'zonos'],
-        shipToCountry: request.shipToCountry || 'FR',
+        shipToCountry: request.shipToCountry || 'US',
         currency: request.currency || 'EUR',
       }),
     });
@@ -86,12 +89,13 @@ class ApiService {
     imageUri: string,
     options: Omit<ClassifyRequest, 'imageBase64' | 'imageUrl'> = {}
   ): Promise<ComparisonResult> {
+    // Always request duty calculation — the backend will use AI-estimated value if none provided
     // Check if it's a URL or local file
     if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
       return this.classify({
         ...options,
         imageUrl: imageUri,
-        calculateDuty: options.productValue !== undefined,
+        calculateDuty: true,
       });
     }
 
@@ -100,7 +104,7 @@ class ApiService {
     return this.classify({
       ...options,
       imageBase64: base64,
-      calculateDuty: options.productValue !== undefined,
+      calculateDuty: true,
     });
   }
 
@@ -144,6 +148,21 @@ class ApiService {
     avgConfidence: { anthropic: number; zonos: number };
   }> {
     return this.fetch('/api/compare/stats/summary');
+  }
+
+  // Parse voice command via LLM fallback (Tier 2)
+  async parseVoiceCommand(transcript: string): Promise<ParsedVoiceCommand | null> {
+    try {
+      const result = await this.fetch<ParsedVoiceCommand>('/api/parse-voice', {
+        method: 'POST',
+        body: JSON.stringify({ transcript }),
+      });
+      // Backend returns { type: null } when no command is recognized
+      if (!result.type) return null;
+      return result;
+    } catch {
+      return null;
+    }
   }
 
   // Update base URL (useful for settings)

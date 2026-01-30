@@ -3,6 +3,7 @@
  */
 
 import { create } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import type {
   GlassesConnectionState,
   GlassesDevice,
@@ -28,10 +29,12 @@ interface ScanSlice {
   isProcessing: boolean;
   currentResult: ComparisonResult | null;
   error: string | null;
+  shipToCountry: string;
   setCapturedImage: (image: string | null) => void;
   setIsProcessing: (isProcessing: boolean) => void;
   setCurrentResult: (result: ComparisonResult | null) => void;
   setScanError: (error: string | null) => void;
+  setShipToCountry: (country: string) => void;
   resetScan: () => void;
 }
 
@@ -68,11 +71,13 @@ export const useAppStore = create<AppStore>((set) => ({
   capturedImage: null,
   isProcessing: false,
   currentResult: null,
+  shipToCountry: 'US',
 
   setCapturedImage: (capturedImage) => set({ capturedImage }),
   setIsProcessing: (isProcessing) => set({ isProcessing }),
   setCurrentResult: (currentResult) => set({ currentResult }),
   setScanError: (error) => set({ error }),
+  setShipToCountry: (shipToCountry) => set({ shipToCountry }),
   resetScan: () =>
     set({
       capturedImage: null,
@@ -88,24 +93,30 @@ export const useAppStore = create<AppStore>((set) => ({
   clearHistory: () => set({ results: [] }),
 }));
 
-// Selectors for convenience
+// Selectors for convenience (useShallow prevents infinite re-renders with React 19)
 export const useGlassesState = () =>
-  useAppStore((state) => ({
-    connectionState: state.connectionState,
-    device: state.device,
-    error: state.error,
-    isCapturing: state.isCapturing,
-  }));
+  useAppStore(
+    useShallow((state) => ({
+      connectionState: state.connectionState,
+      device: state.device,
+      error: state.error,
+      isCapturing: state.isCapturing,
+    }))
+  );
 
 export const useScanState = () =>
-  useAppStore((state) => ({
-    capturedImage: state.capturedImage,
-    isProcessing: state.isProcessing,
-    currentResult: state.currentResult,
-    error: state.error,
-  }));
+  useAppStore(
+    useShallow((state) => ({
+      capturedImage: state.capturedImage,
+      isProcessing: state.isProcessing,
+      currentResult: state.currentResult,
+      error: state.error,
+    }))
+  );
 
 export const useHistoryState = () =>
-  useAppStore((state) => ({
-    results: state.results,
-  }));
+  useAppStore(
+    useShallow((state) => ({
+      results: state.results,
+    }))
+  );

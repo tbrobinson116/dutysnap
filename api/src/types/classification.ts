@@ -15,6 +15,7 @@ export interface ClassificationResult {
   description: string;
   confidence: number; // 0-1
   reasoning?: string;
+  estimatedValueEUR?: number; // AI-estimated retail value in EUR
   rawResponse?: unknown;
   latencyMs: number;
   error?: string;
@@ -48,6 +49,8 @@ export interface ComparisonResult {
   timestamp: string;
   input: ClassificationInput;
   productValue?: number;
+  isEstimatedValue?: boolean; // true if value was AI-estimated rather than user-provided
+  shipToCountry: string;
   currency?: string;
 
   classifications: {

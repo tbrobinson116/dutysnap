@@ -53,6 +53,7 @@ export interface DutyCalculation {
     rate?: string;
   }>;
   currency: string;
+  error?: string;
 }
 
 export interface ComparisonResult {
@@ -62,6 +63,8 @@ export interface ComparisonResult {
   productName?: string;
   productDescription?: string;
   productValue?: number;
+  isEstimatedValue?: boolean;
+  shipToCountry?: string;
   originCountry?: string;
   classifications: {
     anthropic?: ClassificationResult;
@@ -81,6 +84,9 @@ export type RootStackParamList = {
   History: undefined;
   Settings: undefined;
 };
+
+// Voice types
+export * from './voice';
 
 // Scan state
 export interface ScanState {

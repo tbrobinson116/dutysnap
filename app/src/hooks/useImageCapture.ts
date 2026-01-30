@@ -3,6 +3,7 @@
  */
 
 import { useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../services/store';
 import { metaSDK } from '../services/metaSDK';
 import * as ImagePicker from 'expo-image-picker';
@@ -14,16 +15,19 @@ export function useImageCapture() {
     setCapturedImage,
     setIsCapturing,
     setScanError,
-  } = useAppStore((state) => ({
-    capturedImage: state.capturedImage,
-    isCapturing: state.isCapturing,
-    setCapturedImage: state.setCapturedImage,
-    setIsCapturing: state.setIsCapturing,
-    setScanError: state.setScanError,
-  }));
+  } = useAppStore(
+    useShallow((state) => ({
+      capturedImage: state.capturedImage,
+      isCapturing: state.isCapturing,
+      setCapturedImage: state.setCapturedImage,
+      setIsCapturing: state.setIsCapturing,
+      setScanError: state.setScanError,
+    }))
+  );
 
   // Capture from Meta glasses
   const captureFromGlasses = useCallback(async () => {
+    console.log('[ImageCapture] captureFromGlasses called, connected:', metaSDK.isConnected());
     if (!metaSDK.isConnected()) {
       setScanError('Glasses not connected');
       return null;
@@ -34,9 +38,11 @@ export function useImageCapture() {
 
     try {
       const imageUri = await metaSDK.capturePhoto();
+      console.log('[ImageCapture] Got image, uri length:', imageUri?.length);
       setCapturedImage(imageUri);
       return imageUri;
     } catch (err) {
+      console.error('[ImageCapture] Capture error:', err);
       setScanError(
         err instanceof Error ? err.message : 'Failed to capture photo'
       );

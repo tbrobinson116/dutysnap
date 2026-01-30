@@ -2,14 +2,17 @@
  * Meta Wearables SDK Service
  *
  * This service provides an abstraction layer for the Meta Wearables Device Access Toolkit.
- * It supports both real glasses and a mock implementation for development.
+ * It supports both real glasses (via the native MetaGlasses Expo module) and a mock
+ * implementation for development without hardware.
  *
  * Real SDK integration requires:
- * - iOS: meta-wearables-dat-ios pod
- * - Android: meta-wearables-dat-android dependency
+ * - iOS: meta-wearables-dat-ios SPM package (added via expo config plugin)
+ * - A custom dev build (expo-dev-client)
  */
 
 import type { GlassesDevice, GlassesConnectionState } from '../types';
+import * as MetaGlasses from '../../modules/meta-glasses';
+import type { Subscription } from 'expo-modules-core';
 
 // Event types for glasses events
 export type GlassesEventType =
@@ -30,9 +33,17 @@ class MetaSDKService {
   private listeners: Map<GlassesEventType, Set<EventListener>> = new Map();
   private connectionState: GlassesConnectionState = 'disconnected';
   private connectedDevice: GlassesDevice | null = null;
-  private useMockDevice: boolean = true; // Set to false when real SDK is integrated
+  private useMockDevice: boolean;
+  private nativeSubscriptions: Subscription[] = [];
 
   constructor() {
+    // Fall back to mock when the native SDK isn't compiled in.
+    // isAvailable = native module linked (dev client).
+    // isSDKAvailable() = Meta DAT SDK actually present (SPM package).
+    const sdkReady = MetaGlasses.isAvailable && MetaGlasses.isSDKAvailable();
+    this.useMockDevice = !sdkReady;
+    console.log(`[MetaSDK] Native module linked: ${MetaGlasses.isAvailable}, SDK compiled: ${sdkReady}, mock: ${this.useMockDevice}`);
+
     // Initialize event listener maps
     const eventTypes: GlassesEventType[] = [
       'connectionStateChanged',
@@ -42,9 +53,81 @@ class MetaSDKService {
       'error',
     ];
     eventTypes.forEach((type) => this.listeners.set(type, new Set()));
+
+    // Subscribe to native events when available
+    if (!this.useMockDevice) {
+      this.subscribeToNativeEvents();
+
+      // Sync current native state (handles JS hot-reload while native is still connected)
+      const nativeState = MetaGlasses.getConnectionState() as GlassesConnectionState;
+      if (nativeState && nativeState !== 'disconnected') {
+        console.log(`[MetaSDK] Syncing native state on startup: ${nativeState}`);
+        this.connectionState = nativeState;
+        if (nativeState === 'connected') {
+          this.connectedDevice = {
+            id: 'native-device',
+            name: 'Ray-Ban Meta',
+            model: 'ray-ban-meta-gen2',
+          };
+        }
+        // Emit so the store picks it up
+        setTimeout(() => {
+          this.emit('connectionStateChanged', { state: nativeState });
+        }, 100);
+      }
+    }
+
+    // Always subscribe to debug events if native module is available
+    if (MetaGlasses.isAvailable) {
+      MetaGlasses.addDebugListener((event) => {
+        console.log('[MetaGlasses Native]', event.message);
+      });
+    }
   }
 
-  // Event handling
+  // ── Native event bridge ──
+
+  private subscribeToNativeEvents(): void {
+    this.nativeSubscriptions.push(
+      MetaGlasses.addConnectionStateListener((event) => {
+        const state = event.state as GlassesConnectionState;
+        this.connectionState = state;
+        this.emit('connectionStateChanged', { state });
+
+        if (state === 'connected') {
+          // Populate a basic device record when connected through native.
+          // Don't emit 'deviceDiscovered' — the hook auto-calls connect()
+          // on discovered devices, which would reset state back to 'connecting'.
+          this.connectedDevice = {
+            id: 'native-device',
+            name: 'Ray-Ban Meta',
+            model: 'ray-ban-meta-gen2',
+          };
+        } else if (state === 'disconnected') {
+          this.connectedDevice = null;
+        }
+      })
+    );
+
+    this.nativeSubscriptions.push(
+      MetaGlasses.addPhotoCapturedListener((event) => {
+        this.emit('photoCaptured', {
+          base64: event.base64,
+          width: event.width,
+          height: event.height,
+        });
+      })
+    );
+
+    this.nativeSubscriptions.push(
+      MetaGlasses.addErrorListener((event) => {
+        this.emit('error', { message: event.message });
+      })
+    );
+  }
+
+  // ── Event handling ──
+
   addEventListener(type: GlassesEventType, listener: EventListener): void {
     this.listeners.get(type)?.add(listener);
   }
@@ -63,7 +146,8 @@ class MetaSDKService {
     this.emit('connectionStateChanged', { state });
   }
 
-  // Connection methods
+  // ── Connection methods ──
+
   async startScanning(): Promise<void> {
     if (this.connectionState !== 'disconnected') {
       return;
@@ -84,8 +168,11 @@ class MetaSDKService {
         this.emit('deviceDiscovered', { device: mockDevice });
       }, 1500);
     } else {
-      // Real SDK implementation would go here
-      // await NativeMetaSDK.startScanning();
+      // Registration opens the Meta AI app for authorization.
+      // After the user approves, Meta AI redirects back via dutysnap:// URL.
+      // The native MetaGlassesAppDelegate handles the URL, completes registration,
+      // and automatically triggers scanning via NotificationCenter.
+      MetaGlasses.startRegistration();
     }
   }
 
@@ -95,23 +182,21 @@ class MetaSDKService {
     }
 
     if (!this.useMockDevice) {
-      // Real SDK implementation
-      // await NativeMetaSDK.stopScanning();
+      MetaGlasses.stopScanning();
     }
   }
 
   async connect(device: GlassesDevice): Promise<void> {
-    this.setConnectionState('connecting');
-
     if (this.useMockDevice) {
+      this.setConnectionState('connecting');
       // Simulate connection delay
       await new Promise((resolve) => setTimeout(resolve, 2000));
       this.connectedDevice = device;
       this.setConnectionState('connected');
-    } else {
-      // Real SDK implementation
-      // await NativeMetaSDK.connect(device.id);
     }
+    // In native mode, the AutoDeviceSelector handles connection automatically
+    // and we receive state updates via the native event listener.
+    // Don't change state here — native events drive it.
   }
 
   async disconnect(): Promise<void> {
@@ -119,32 +204,36 @@ class MetaSDKService {
       this.connectedDevice = null;
       this.setConnectionState('disconnected');
     } else {
-      // Real SDK implementation
-      // await NativeMetaSDK.disconnect();
+      MetaGlasses.disconnect();
+      // State will update via native event
     }
   }
 
-  // Photo capture
+  // ── Photo capture ──
+
   async capturePhoto(): Promise<string> {
+    console.log('[MetaSDK] capturePhoto called, state:', this.connectionState, 'mock:', this.useMockDevice);
     if (this.connectionState !== 'connected') {
       throw new Error('Glasses not connected');
     }
 
     if (this.useMockDevice) {
       // Return a placeholder image for mock device
-      // In real implementation, this would capture from glasses camera
       await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Return a sample product image URL for testing
       const mockImageUri = 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=800';
-
       this.emit('photoCaptured', { uri: mockImageUri });
       return mockImageUri;
-    } else {
-      // Real SDK implementation
-      // const result = await NativeMetaSDK.capturePhoto({ format: 'jpeg' });
-      // return result.uri;
-      throw new Error('Real SDK not implemented');
+    }
+
+    // Native capture — returns base64 JPEG string
+    console.log('[MetaSDK] Calling native capturePhoto...');
+    try {
+      const base64 = await MetaGlasses.capturePhoto();
+      console.log('[MetaSDK] Photo captured, base64 length:', base64?.length);
+      return `data:image/jpeg;base64,${base64}`;
+    } catch (err) {
+      console.error('[MetaSDK] capturePhoto error:', err);
+      throw err;
     }
   }
 
@@ -155,7 +244,8 @@ class MetaSDKService {
     throw new Error('Use CameraService for device camera');
   }
 
-  // Getters
+  // ── Getters ──
+
   getConnectionState(): GlassesConnectionState {
     return this.connectionState;
   }
@@ -171,10 +261,25 @@ class MetaSDKService {
   // Mock device toggle (for development)
   setUseMockDevice(useMock: boolean): void {
     this.useMockDevice = useMock;
+
+    // Clean up native subscriptions when switching to mock
+    if (useMock) {
+      this.nativeSubscriptions.forEach((sub) => sub.remove());
+      this.nativeSubscriptions = [];
+    } else {
+      this.subscribeToNativeEvents();
+    }
   }
 
   isMockDevice(): boolean {
     return this.useMockDevice;
+  }
+
+  // Clean up when service is no longer needed
+  destroy(): void {
+    this.nativeSubscriptions.forEach((sub) => sub.remove());
+    this.nativeSubscriptions = [];
+    this.listeners.forEach((set) => set.clear());
   }
 }
 

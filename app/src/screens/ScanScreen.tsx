@@ -2,7 +2,7 @@
  * Scan Screen - Capture and classify products
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,14 +18,62 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useShallow } from 'zustand/react/shallow';
 import {
   useGlassesConnection,
   useImageCapture,
   useClassification,
 } from '../hooks';
+import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import { useAppStore } from '../services/store';
 import type { RootStackParamList } from '../types';
+import type { VoiceMode } from '../types/voice';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Scan'>;
+
+function VoiceIndicator({
+  mode,
+  transcript,
+  onTap,
+}: {
+  mode: VoiceMode;
+  transcript: string;
+  onTap: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.voiceIndicator,
+        mode === 'active_listening' && styles.voiceIndicatorActive,
+      ]}
+      onPress={onTap}
+      activeOpacity={0.7}
+    >
+      <View style={styles.voiceIndicatorRow}>
+        {mode === 'idle' && (
+          <>
+            <View style={[styles.micDot, styles.micDotIdle]} />
+            <Text style={styles.voiceHint}>Tap to speak a command</Text>
+          </>
+        )}
+        {mode === 'active_listening' && (
+          <>
+            <View style={[styles.micDot, styles.micDotActive]} />
+            <Text style={styles.voiceActiveText} numberOfLines={1}>
+              {transcript || 'Listening...'}
+            </Text>
+          </>
+        )}
+        {mode === 'processing' && (
+          <>
+            <ActivityIndicator size="small" color="#1976D2" />
+            <Text style={styles.voiceHint}>Processing...</Text>
+          </>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 export function ScanScreen() {
   const navigation = useNavigation<NavigationProp>();
@@ -40,10 +88,20 @@ export function ScanScreen() {
   } = useImageCapture();
   const { isProcessing, classifyImage, error } = useClassification();
 
+  const { shipToCountry, setShipToCountry } = useAppStore(
+    useShallow((state) => ({
+      shipToCountry: state.shipToCountry,
+      setShipToCountry: state.setShipToCountry,
+    }))
+  );
+
   // Optional product details
   const [productName, setProductName] = useState('');
   const [productValue, setProductValue] = useState('');
   const [originCountry, setOriginCountry] = useState('');
+
+  // Debug input for simulating voice commands in dev mode
+  const [debugVoiceInput, setDebugVoiceInput] = useState('');
 
   const handleCapture = async (method: 'glasses' | 'camera' | 'gallery') => {
     let imageUri: string | null = null;
@@ -70,12 +128,66 @@ export function ScanScreen() {
       productName: productName || undefined,
       productValue: productValue ? parseFloat(productValue) : undefined,
       originCountry: originCountry || undefined,
+      shipToCountry: shipToCountry || undefined,
     });
 
     if (result) {
       navigation.navigate('Results', { comparisonId: result.id });
     }
   };
+
+  // Voice command callbacks
+  const onVoiceCapture = useCallback(() => {
+    handleCapture('glasses');
+  }, []);
+
+  const onVoiceSetOrigin = useCallback((code: string) => {
+    setOriginCountry(code);
+  }, []);
+
+  const onVoiceSetDestination = useCallback((code: string) => {
+    setShipToCountry(code);
+  }, [setShipToCountry]);
+
+  const onVoiceSetProductInfo = useCallback(
+    (name: string, value?: number, _currency?: string) => {
+      setProductName(name);
+      if (value !== undefined) {
+        setProductValue(String(value));
+      }
+    },
+    [],
+  );
+
+  const onVoiceNavigate = useCallback(
+    (destination: 'back' | 'history' | 'home') => {
+      switch (destination) {
+        case 'back':
+          navigation.goBack();
+          break;
+        case 'history':
+          navigation.navigate('History');
+          break;
+        case 'home':
+          navigation.navigate('Home');
+          break;
+      }
+    },
+    [navigation],
+  );
+
+  const {
+    mode: voiceMode,
+    transcript: voiceTranscript,
+    activate: activateVoice,
+    simulateCommand,
+  } = useVoiceCommands({
+    onCapture: onVoiceCapture,
+    onSetOriginCountry: onVoiceSetOrigin,
+    onSetDestinationCountry: onVoiceSetDestination,
+    onSetProductInfo: onVoiceSetProductInfo,
+    onNavigate: onVoiceNavigate,
+  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -84,6 +196,13 @@ export function ScanScreen() {
         style={styles.container}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Voice Indicator */}
+          <VoiceIndicator
+            mode={voiceMode}
+            transcript={voiceTranscript}
+            onTap={activateVoice}
+          />
+
           {/* Image Preview */}
           <View style={styles.imageContainer}>
             {capturedImage ? (
@@ -151,43 +270,60 @@ export function ScanScreen() {
             </View>
           )}
 
-          {/* Optional Details */}
+          {/* Details Section */}
           {capturedImage && (
             <View style={styles.detailsSection}>
-              <Text style={styles.sectionTitle}>Product Details (Optional)</Text>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Product Name</Text>
+              {/* Ship To - the key input */}
+              <View style={styles.shipToRow}>
+                <Text style={styles.shipToLabel}>Ship to</Text>
                 <TextInput
-                  style={styles.input}
-                  placeholder="e.g., Leather handbag"
-                  value={productName}
-                  onChangeText={setProductName}
+                  style={styles.shipToInput}
+                  placeholder="US"
+                  value={shipToCountry}
+                  onChangeText={(text) => setShipToCountry(text.toUpperCase())}
+                  maxLength={2}
+                  autoCapitalize="characters"
+                  selectTextOnFocus
                 />
               </View>
 
-              <View style={styles.inputRow}>
-                <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.inputLabel}>Value (EUR)</Text>
+              {/* Optional fields in a compact layout */}
+              <View style={styles.optionalFields}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Product name</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="e.g., 250"
-                    value={productValue}
-                    onChangeText={setProductValue}
-                    keyboardType="decimal-pad"
+                    placeholder="e.g., Leather handbag"
+                    value={productName}
+                    onChangeText={setProductName}
                   />
                 </View>
 
-                <View style={[styles.inputGroup, { flex: 1, marginLeft: 12 }]}>
-                  <Text style={styles.inputLabel}>Origin Country</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="e.g., IT"
-                    value={originCountry}
-                    onChangeText={setOriginCountry}
-                    maxLength={2}
-                    autoCapitalize="characters"
-                  />
+                <View style={styles.inputRow}>
+                  <View style={[styles.inputGroup, { flex: 1 }]}>
+                    <Text style={styles.inputLabel}>Origin</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g., CN"
+                      value={originCountry}
+                      onChangeText={(text) =>
+                        setOriginCountry(text.toUpperCase())
+                      }
+                      maxLength={2}
+                      autoCapitalize="characters"
+                    />
+                  </View>
+
+                  <View style={[styles.inputGroup, { flex: 1, marginLeft: 12 }]}>
+                    <Text style={styles.inputLabel}>Value (EUR)</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Auto-estimated"
+                      value={productValue}
+                      onChangeText={setProductValue}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
                 </View>
               </View>
 
@@ -207,7 +343,7 @@ export function ScanScreen() {
                   </>
                 ) : (
                   <Text style={styles.classifyButtonText}>
-                    🔍 Classify Product
+                    Classify & Calculate Duty
                   </Text>
                 )}
               </TouchableOpacity>
@@ -217,6 +353,39 @@ export function ScanScreen() {
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               )}
+            </View>
+          )}
+
+          {/* DEV: Voice command simulator */}
+          {__DEV__ && (
+            <View style={styles.debugPanel}>
+              <Text style={styles.debugLabel}>Voice Debug</Text>
+              <View style={styles.debugRow}>
+                <TextInput
+                  style={styles.debugInput}
+                  placeholder='e.g., "snap" or "ship to France"'
+                  value={debugVoiceInput}
+                  onChangeText={setDebugVoiceInput}
+                  onSubmitEditing={() => {
+                    if (debugVoiceInput.trim()) {
+                      simulateCommand(debugVoiceInput.trim());
+                      setDebugVoiceInput('');
+                    }
+                  }}
+                  returnKeyType="send"
+                />
+                <TouchableOpacity
+                  style={styles.debugSendButton}
+                  onPress={() => {
+                    if (debugVoiceInput.trim()) {
+                      simulateCommand(debugVoiceInput.trim());
+                      setDebugVoiceInput('');
+                    }
+                  }}
+                >
+                  <Text style={styles.debugSendText}>Send</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </ScrollView>
@@ -233,6 +402,45 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
   },
+  // Voice indicator styles
+  voiceIndicator: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  voiceIndicatorActive: {
+    backgroundColor: '#FFEBEE',
+  },
+  voiceIndicatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  micDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 10,
+  },
+  micDotIdle: {
+    backgroundColor: '#90CAF9',
+  },
+  micDotActive: {
+    backgroundColor: '#F44336',
+  },
+  voiceHint: {
+    flex: 1,
+    fontSize: 14,
+    color: '#666',
+  },
+  voiceActiveText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#F44336',
+    fontWeight: '600',
+  },
+  // Existing styles
   imageContainer: {
     aspectRatio: 4 / 3,
     backgroundColor: '#e0e0e0',
@@ -313,23 +521,48 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   detailsSection: {
-    marginTop: 24,
+    marginTop: 20,
   },
-  sectionTitle: {
+  shipToRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  shipToLabel: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 16,
+    marginRight: 12,
+  },
+  shipToInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1976D2',
+    textAlign: 'right',
+    padding: 0,
+  },
+  optionalFields: {
+    marginBottom: 4,
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   inputRow: {
     flexDirection: 'row',
   },
   inputLabel: {
     fontSize: 13,
-    color: '#666',
+    color: '#888',
     marginBottom: 6,
   },
   input: {
@@ -348,7 +581,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    marginTop: 8,
+    marginTop: 4,
   },
   classifyButtonDisabled: {
     backgroundColor: '#90CAF9',
@@ -367,5 +600,45 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#C62828',
     fontSize: 14,
+  },
+  // Debug panel styles
+  debugPanel: {
+    marginTop: 24,
+    padding: 12,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+  },
+  debugLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#E65100',
+    marginBottom: 8,
+  },
+  debugRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  debugInput: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+  },
+  debugSendButton: {
+    backgroundColor: '#FF9800',
+    borderRadius: 6,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  debugSendText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

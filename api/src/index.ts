@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import compareRouter from './routes/compare.js';
+import dutyRouter from './routes/duty.js';
+import voiceRouter from './routes/voice.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,6 +28,8 @@ app.get('/api', (_req, res) => {
       'GET /api/compare': 'List all comparison results',
       'GET /api/compare/:id': 'Get specific comparison result',
       'GET /api/compare/stats/summary': 'Get aggregated comparison statistics',
+      'POST /api/duty': 'Calculate import duties and taxes for an HS code',
+      'POST /api/parse-voice': 'Parse a voice command transcript using LLM fallback',
     },
     documentation: {
       compareRequest: {
@@ -46,6 +50,8 @@ app.get('/api', (_req, res) => {
 
 // Routes
 app.use('/api/compare', compareRouter);
+app.use('/api/duty', dutyRouter);
+app.use('/api/parse-voice', voiceRouter);
 
 // Error handling
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -67,6 +73,8 @@ app.listen(PORT, () => {
 ║    GET  /api/compare      - List all results              ║
 ║    GET  /api/compare/:id  - Get specific result           ║
 ║    GET  /api/compare/stats/summary - Get statistics       ║
+║    POST /api/duty         - Calculate duties/taxes        ║
+║    POST /api/parse-voice  - Parse voice command (LLM)    ║
 ║                                                           ║
 ║  Environment:                                             ║
 ║    ANTHROPIC_API_KEY: ${process.env.ANTHROPIC_API_KEY ? '✓ configured' : '✗ missing'}                      ║

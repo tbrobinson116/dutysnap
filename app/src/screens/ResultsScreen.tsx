@@ -11,6 +11,7 @@ import {
   Image,
   SafeAreaView,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -209,7 +210,17 @@ export function ResultsScreen() {
         {/* Duty Calculations */}
         {result.dutyCalculations && result.productValue && (
           <>
-            <Text style={styles.sectionTitle}>French Import Duties</Text>
+            <Text style={styles.sectionTitle}>
+              Import Duties{result.shipToCountry ? ` — ${result.shipToCountry}` : ''}
+            </Text>
+
+            {result.isEstimatedValue && (
+              <View style={styles.estimatedBanner}>
+                <Text style={styles.estimatedText}>
+                  Value estimated by AI (€{result.productValue.toFixed(2)}) — edit on the scan screen for exact results
+                </Text>
+              </View>
+            )}
 
             <DutyCard
               title="Based on Anthropic"
@@ -400,6 +411,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#1976D2',
+  },
+  estimatedBanner: {
+    backgroundColor: '#FFF8E1',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FFE082',
+  },
+  estimatedText: {
+    fontSize: 13,
+    color: '#F57F17',
+    textAlign: 'center',
   },
   errorContainer: {
     flex: 1,

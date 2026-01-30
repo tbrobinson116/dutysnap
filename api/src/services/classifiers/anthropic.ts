@@ -3,13 +3,14 @@ import type { ClassificationInput, ClassificationResult } from '../../types/clas
 
 const HS_CODE_SYSTEM_PROMPT = `You are an expert customs classification specialist with deep knowledge of the Harmonized System (HS) codes used for international trade.
 
-Your task is to analyze product images and descriptions to determine the most accurate HS code for customs classification.
+Your task is to analyze product images and descriptions to determine the most accurate HS code for customs classification. You must also estimate the retail value of the product in EUR.
 
 When classifying products:
 1. Identify the product type, material composition, and intended use
 2. Consider the General Rules of Interpretation (GRI)
 3. Provide the most specific HS code possible (6-10 digits)
-4. For EU/France imports, provide the 8-digit CN (Combined Nomenclature) code when possible
+4. For EU imports, provide the 8-digit CN (Combined Nomenclature) code when possible. For US imports, provide the HTS code.
+5. Estimate the retail market value of the product in EUR based on the image, brand indicators, material quality, and product category
 
 Response format (JSON):
 {
@@ -19,10 +20,11 @@ Response format (JSON):
   "description": "Official HS description for this code",
   "confidence": 0.85,       // 0-1 confidence score
   "reasoning": "Brief explanation of classification logic",
-  "productIdentified": "What product you identified in the image"
+  "productIdentified": "What product you identified in the image",
+  "estimatedValueEUR": 150.00 // Estimated retail value in EUR
 }
 
-Be precise and conservative with confidence scores. Only high confidence (>0.8) for clear, unambiguous products.`;
+Be precise and conservative with confidence scores. Only high confidence (>0.8) for clear, unambiguous products. For value estimation, provide your best estimate based on visible brand, quality, and product category. If uncertain, estimate conservatively.`;
 
 export async function classifyWithAnthropic(
   input: ClassificationInput
@@ -72,7 +74,8 @@ export async function classifyWithAnthropic(
     }
 
     // Build text prompt
-    let textPrompt = 'Classify this product for customs import to France.\n\n';
+    const destination = input.shipToCountry || 'US';
+    let textPrompt = `Classify this product for customs import to ${destination}.\n\n`;
     if (input.productName) {
       textPrompt += `Product Name: ${input.productName}\n`;
     }
@@ -82,7 +85,7 @@ export async function classifyWithAnthropic(
     if (input.originCountry) {
       textPrompt += `Origin Country: ${input.originCountry}\n`;
     }
-    textPrompt += `\nDestination: ${input.shipToCountry || 'France (FR)'}\n`;
+    textPrompt += `\nDestination: ${destination}\n`;
     textPrompt += '\nProvide the HS code classification in JSON format.';
 
     content.push({ type: 'text', text: textPrompt });
@@ -118,6 +121,7 @@ export async function classifyWithAnthropic(
       description: parsed.description || '',
       confidence: parsed.confidence || 0.5,
       reasoning: parsed.reasoning,
+      estimatedValueEUR: typeof parsed.estimatedValueEUR === 'number' ? parsed.estimatedValueEUR : undefined,
       rawResponse: parsed,
       latencyMs,
     };

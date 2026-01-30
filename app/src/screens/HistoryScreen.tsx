@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../services/store';
 import type { RootStackParamList, ComparisonResult } from '../types';
 
@@ -76,10 +77,12 @@ function HistoryItem({
 
 export function HistoryScreen() {
   const navigation = useNavigation<NavigationProp>();
-  const { results, clearHistory } = useAppStore((state) => ({
-    results: state.results,
-    clearHistory: state.clearHistory,
-  }));
+  const { results, clearHistory } = useAppStore(
+    useShallow((state) => ({
+      results: state.results,
+      clearHistory: state.clearHistory,
+    }))
+  );
 
   if (results.length === 0) {
     return (

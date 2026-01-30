@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#1976D2"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.dutysnap.app",
@@ -19,7 +21,9 @@
         "NSCameraUsageDescription": "DutySnap needs camera access to capture product images for customs classification.",
         "NSPhotoLibraryUsageDescription": "DutySnap needs photo library access to select product images for classification.",
         "NSBluetoothAlwaysUsageDescription": "DutySnap needs Bluetooth to connect to Meta Ray-Ban glasses.",
-        "NSBluetoothPeripheralUsageDescription": "DutySnap needs Bluetooth to connect to Meta Ray-Ban glasses."
+        "NSBluetoothPeripheralUsageDescription": "DutySnap needs Bluetooth to connect to Meta Ray-Ban glasses.",
+        "NSSpeechRecognitionUsageDescription": "DutySnap uses speech recognition for hands-free voice commands.",
+        "NSMicrophoneUsageDescription": "DutySnap needs microphone access for voice commands via the glasses."
       }
     },
     "android": {
@@ -33,7 +37,8 @@
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.BLUETOOTH_SCAN"
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -51,7 +56,10 @@
         {
           "photosPermission": "Allow DutySnap to access your photos to select product images."
         }
-      ]
+      ],
+      "expo-asset",
+      "@react-native-voice/voice",
+      "./modules/meta-glasses/app.plugin.js"
     ]
   }
 }

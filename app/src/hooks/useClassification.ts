@@ -3,6 +3,7 @@
  */
 
 import { useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '../services/store';
 import { api } from '../services/api';
 
@@ -11,6 +12,7 @@ interface ClassifyOptions {
   productDescription?: string;
   productValue?: number;
   originCountry?: string;
+  shipToCountry?: string;
 }
 
 export function useClassification() {
@@ -22,15 +24,17 @@ export function useClassification() {
     setCurrentResult,
     setScanError,
     addResult,
-  } = useAppStore((state) => ({
-    isProcessing: state.isProcessing,
-    currentResult: state.currentResult,
-    error: state.error,
-    setIsProcessing: state.setIsProcessing,
-    setCurrentResult: state.setCurrentResult,
-    setScanError: state.setScanError,
-    addResult: state.addResult,
-  }));
+  } = useAppStore(
+    useShallow((state) => ({
+      isProcessing: state.isProcessing,
+      currentResult: state.currentResult,
+      error: state.error,
+      setIsProcessing: state.setIsProcessing,
+      setCurrentResult: state.setCurrentResult,
+      setScanError: state.setScanError,
+      addResult: state.addResult,
+    }))
+  );
 
   // Run classification on an image
   const classifyImage = useCallback(
@@ -44,8 +48,22 @@ export function useClassification() {
           productDescription: options.productDescription,
           productValue: options.productValue,
           originCountry: options.originCountry,
-          calculateDuty: options.productValue !== undefined,
+          shipToCountry: options.shipToCountry,
+          calculateDuty: true,
         });
+
+        console.log('[Classification] API response:', JSON.stringify({
+          id: result.id,
+          hasAnthropicClass: !!result.classifications?.anthropic,
+          hasZonosClass: !!result.classifications?.zonos,
+          anthropicError: result.classifications?.anthropic?.error,
+          zonosError: result.classifications?.zonos?.error,
+          zonosHsCode: result.classifications?.zonos?.hsCode6,
+          hasDutyCalcs: !!result.dutyCalculations,
+          anthropicDuty: !!result.dutyCalculations?.anthropic,
+          zonosDuty: !!result.dutyCalculations?.zonos,
+          productValue: result.productValue,
+        }));
 
         // Add image URI to result for display
         const resultWithImage = {
@@ -85,7 +103,8 @@ export function useClassification() {
           productDescription,
           productValue: options.productValue,
           originCountry: options.originCountry,
-          calculateDuty: options.productValue !== undefined,
+          shipToCountry: options.shipToCountry,
+          calculateDuty: true,
         });
 
         setCurrentResult(result);
